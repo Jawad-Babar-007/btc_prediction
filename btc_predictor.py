@@ -14,9 +14,14 @@ import joblib
 # Suppress warnings
 warnings.filterwarnings('ignore')
 
+# In btc_predictor.py
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
 def fetch_binance_klines(symbol='BTCUSDT', interval='4h', limit=1000):
     """
-    Fetch kline data from Binance with error handling and rate limiting
+    Fetch kline data from Binance with retry logic
     """
     url = 'https://api.binance.com/api/v3/klines'
     params = {
@@ -25,37 +30,24 @@ def fetch_binance_klines(symbol='BTCUSDT', interval='4h', limit=1000):
         'limit': limit
     }
     
+    session = requests.Session()
+    retries = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
+    session.mount('https://', HTTPAdapter(max_retries=retries))
+    
     try:
-        response = requests.get(url, params=params)
-        response.raise_for_status()  # Raise exception for 4XX/5XX responses
+        response = session.get(
+            url, 
+            params=params,
+            timeout=10,
+            verify=False  # Bypass SSL verification
+        )
+        response.raise_for_status()
         data = response.json()
         
-        # Create DataFrame
-        df = pd.DataFrame(data, columns=[
-            'Open Time', 'Open', 'High', 'Low', 'Close', 'Volume',
-            'Close Time', 'Quote Asset Volume', 'Number of Trades',
-            'Taker Buy Base Asset Volume', 'Taker Buy Quote Asset Volume', 'Ignore'
-        ])
+        # Rest of your existing code...
         
-        # Convert data types
-        df['Open Time'] = pd.to_datetime(df['Open Time'], unit='ms')
-        df['Close Time'] = pd.to_datetime(df['Close Time'], unit='ms')
-        numeric_columns = ['Open', 'High', 'Low', 'Close', 'Volume', 
-                          'Quote Asset Volume', 'Number of Trades',
-                          'Taker Buy Base Asset Volume', 'Taker Buy Quote Asset Volume']
-        df[numeric_columns] = df[numeric_columns].astype(float)
-        
-        # Add date features
-        df['Hour'] = df['Open Time'].dt.hour
-        df['Day'] = df['Open Time'].dt.day
-        df['Month'] = df['Open Time'].dt.month
-        df['Year'] = df['Open Time'].dt.year
-        df['DayOfWeek'] = df['Open Time'].dt.dayofweek
-        
-        return df
-    
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching data from Binance: {e}")
+    except Exception as e:
+        print(f"Binance API Error: {str(e)}")
         return None
 
 def add_technical_indicators(df):
